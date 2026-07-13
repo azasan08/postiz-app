@@ -257,6 +257,29 @@ export class OrganizationRepository {
     return create;
   }
 
+  async isInviteAvailable(id: string, orgId: string) {
+    const [usedInvite, organization] = await Promise.all([
+      this._user.model.user.findFirst({
+        where: {
+          inviteId: id,
+        },
+        select: {
+          id: true,
+        },
+      }),
+      this._organization.model.organization.findUnique({
+        where: {
+          id: orgId,
+        },
+        select: {
+          id: true,
+        },
+      }),
+    ]);
+
+    return !usedInvite && !!organization;
+  }
+
   async createOrgAndUser(
     body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
     hasEmail: boolean,

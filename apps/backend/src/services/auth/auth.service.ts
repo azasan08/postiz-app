@@ -12,6 +12,13 @@ import { ForgotReturnPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/for
 import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
 import { NewsletterService } from '@gitroom/nestjs-libraries/newsletter/newsletter.service';
 
+type OrganizationInvitation = {
+  email: string;
+  role: 'USER' | 'ADMIN';
+  orgId: string;
+  id: string;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -37,8 +44,13 @@ export class AuthService {
     body: CreateOrgUserDto | LoginUserDto,
     ip: string,
     userAgent: string,
-    addToOrg?: boolean | { orgId: string; role: 'USER' | 'ADMIN'; id: string }
+    addToOrg?: boolean | OrganizationInvitation
   ) {
+    const invitation =
+      addToOrg && typeof addToOrg !== 'boolean'
+        ? (addToOrg as OrganizationInvitation)
+        : false;
+
     if (provider === Provider.LOCAL) {
       if (process.env.DISALLOW_PLUS && body.email.includes('+')) {
         throw new Error('Email with plus sign is not allowed');
@@ -52,7 +64,9 @@ export class AuthService {
           throw new Error('Email already exists');
         }
 
-        if (!(await this.canRegister(provider))) {
+        this.assertInvitationEmail(body.email, invitation);
+
+        if (!(await this.canCreateAccount(provider, invitation))) {
           throw new Error('Registration is disabled');
         }
 
@@ -90,6 +104,8 @@ export class AuthService {
         throw new Error('User is not activated');
       }
 
+      this.assertInvitationEmail(user.email, invitation);
+
       return { addedOrg: false, jwt: await this.jwt(user) };
     }
 
@@ -97,8 +113,11 @@ export class AuthService {
       provider,
       body as CreateOrgUserDto,
       ip,
-      userAgent
+      userAgent,
+      invitation
     );
+
+    this.assertInvitationEmail(user.email, invitation);
 
     const addedOrg =
       addToOrg && typeof addToOrg !== 'boolean'
@@ -138,7 +157,8 @@ export class AuthService {
     provider: Provider,
     body: CreateOrgUserDto,
     ip: string,
-    userAgent: string
+    userAgent: string,
+    invitation: OrganizationInvitation | false
   ) {
     const providerInstance = this._providerManager.getProvider(provider);
     const providerUser = await providerInstance.getUser(body.providerToken);
@@ -155,7 +175,9 @@ export class AuthService {
       return user;
     }
 
-    if (!(await this.canRegister(provider))) {
+    this.assertInvitationEmail(providerUser.email, invitation);
+
+    if (!(await this.canCreateAccount(provider, invitation))) {
       throw new Error('Registration is disabled');
     }
 
@@ -187,6 +209,35 @@ export class AuthService {
     }
 
     return create.users[0].user;
+  }
+
+  private assertInvitationEmail(
+    userEmail: string,
+    invitation: OrganizationInvitation | false
+  ) {
+    if (
+      invitation &&
+      userEmail.trim().toLowerCase() !== invitation.email.trim().toLowerCase()
+    ) {
+      throw new Error('Invitation email does not match the signed-in account');
+    }
+  }
+
+  private async canCreateAccount(
+    provider: string,
+    invitation: OrganizationInvitation | false
+  ) {
+    if (await this.canRegister(provider)) {
+      return true;
+    }
+
+    return !!(
+      invitation &&
+      (await this._organizationService.isInviteAvailable(
+        invitation.id,
+        invitation.orgId
+      ))
+    );
   }
 
   private async _track(

@@ -47,6 +47,10 @@ export class OrganizationService {
     return this._organizationRepository.addUserToOrg(userId, id, orgId, role);
   }
 
+  isInviteAvailable(id: string, orgId: string) {
+    return this._organizationRepository.isInviteAvailable(id, orgId);
+  }
+
   getOrgById(id: string) {
     return this._organizationRepository.getOrgById(id);
   }
