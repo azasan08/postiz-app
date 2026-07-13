@@ -21,6 +21,8 @@ const hasSeries = (item: AnalyticsDataItem) => item.data.length >= 3;
 
 // In-window trend: second half of the period vs the first half. The backends
 // hardcode percentageChange, so it is ignored entirely.
+// ponytail: spiky low-volume data produces meaningless huge percentages, so
+// anything beyond +-300% is treated as "no comparable baseline" and hidden.
 const seriesTrend = (item: AnalyticsDataItem): number | null => {
   if (!hasSeries(item)) {
     return null;
@@ -35,7 +37,11 @@ const seriesTrend = (item: AnalyticsDataItem): number | null => {
   if (first === 0) {
     return null;
   }
-  return ((second - first) / first) * 100;
+  const trend = ((second - first) / first) * 100;
+  if (Math.abs(trend) > 300) {
+    return null;
+  }
+  return trend;
 };
 
 const rawTotal = (item: AnalyticsDataItem) => {
@@ -58,8 +64,10 @@ const TrendIndicator: FC<{ value: number }> = ({ value }) => {
   const isPositive = value > 0;
   return (
     <div
-      className={`flex items-center gap-[4px] text-[12px] font-medium ${
-        isPositive ? 'text-[#32d583]' : 'text-[#f97066]'
+      className={`flex items-center gap-[4px] text-[12px] font-semibold rounded-[6px] px-[8px] py-[3px] ${
+        isPositive
+          ? 'text-[#1fa971] bg-[#32d583]/10'
+          : 'text-[#e5544d] bg-[#f97066]/10'
       }`}
     >
       <svg
@@ -76,23 +84,45 @@ const TrendIndicator: FC<{ value: number }> = ({ value }) => {
   );
 };
 
+// Catmull-Rom -> cubic bezier so the line reads as a curve, not a seismograph.
+const smoothPath = (points: Array<{ x: number; y: number }>) => {
+  if (points.length < 2) {
+    return '';
+  }
+  let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(
+      2
+    )} ${c2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+  }
+  return d;
+};
+
 const Sparkline: FC<{
   data: Array<{ total: number }>;
   height: number;
   area?: boolean;
 }> = ({ data, height, area }) => {
   const gradientId = useId();
-  const width = 100;
-  const pad = 3;
+  const width = 400;
+  const padY = 8;
   const values = data.map((d) => d.total);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
   const points = values.map((v, i) => ({
     x: (i / (values.length - 1)) * width,
-    y: pad + (1 - (v - min) / range) * (height - pad * 2),
+    y: padY + (1 - (v - min) / range) * (height - padY * 2),
   }));
-  const line = points.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
+  const path = smoothPath(points);
   const last = points[points.length - 1];
 
   return (
@@ -108,25 +138,38 @@ const Sparkline: FC<{
         <>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={ACCENT} stopOpacity="0.18" />
-              <stop offset="1" stopColor={ACCENT} stopOpacity="0" />
+              <stop offset="0" stopColor={ACCENT} stopOpacity="0.25" />
+              <stop offset="1" stopColor={ACCENT} stopOpacity="0.02" />
             </linearGradient>
           </defs>
-          <polygon
-            points={`${line} ${width},${height} 0,${height}`}
+          <path
+            d={`${path} L ${width} ${height} L 0 ${height} Z`}
             fill={`url(#${gradientId})`}
           />
         </>
       )}
-      <polyline
-        points={line}
+      <path
+        d={path}
         fill="none"
         stroke={area ? ACCENT : 'currentColor'}
-        strokeOpacity={area ? 1 : 0.35}
-        strokeWidth={area ? 2 : 1.5}
+        strokeOpacity={area ? 1 : 0.4}
+        strokeWidth={area ? 2.5 : 1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
-      {area && <circle cx={last.x} cy={last.y} r="2.5" fill={ACCENT} />}
+      {area && (
+        <>
+          <circle
+            cx={last.x}
+            cy={last.y}
+            r="8"
+            fill={ACCENT}
+            fillOpacity="0.15"
+          />
+          <circle cx={last.x} cy={last.y} r="3.5" fill={ACCENT} />
+        </>
+      )}
     </svg>
   );
 };
@@ -134,23 +177,40 @@ const Sparkline: FC<{
 const HeroCard: FC<{ item: AnalyticsDataItem }> = ({ item }) => {
   const trend = seriesTrend(item);
   const value = rawTotal(item);
+  const first = item.data[0]?.date;
+  const last = item.data[item.data.length - 1]?.date;
   return (
-    <div className="flex flex-col bg-newTableHeader border border-newTableBorder rounded-[12px] overflow-hidden">
-      <div className="px-[18px] pt-[16px]">
-        <div className="text-[12px] font-medium tracking-wide uppercase text-newTableText">
-          {item.label}
+    <div className="flex flex-col bg-newTableHeader border border-newTableBorder rounded-[14px] overflow-hidden transition-colors hover:border-[#612bd3]/40">
+      <div className="flex items-start justify-between px-[20px] pt-[18px]">
+        <div>
+          <div className="flex items-center gap-[8px]">
+            <div className="w-[8px] h-[8px] rounded-full bg-[#612bd3]" />
+            <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-newTableText">
+              {item.label}
+            </span>
+          </div>
+          <div
+            className={`mt-[6px] text-[42px] leading-[46px] font-semibold tracking-tight tabular-nums ${
+              value < 0 ? 'text-[#f97066]' : ''
+            }`}
+          >
+            {formatTotal(item)}
+          </div>
         </div>
-        <div
-          className={`text-[38px] leading-[44px] font-semibold tracking-tight tabular-nums ${
-            value < 0 ? 'text-[#f97066]' : ''
-          }`}
-        >
-          {formatTotal(item)}
-        </div>
-        {trend !== null && <TrendIndicator value={trend} />}
+        {trend !== null && (
+          <div className="pt-[4px]">
+            <TrendIndicator value={trend} />
+          </div>
+        )}
       </div>
-      <div className="mt-[8px]">
-        <Sparkline data={item.data} height={70} area={true} />
+      <div className="mt-[14px] relative">
+        <Sparkline data={item.data} height={96} area={true} />
+        {first && last && (
+          <div className="absolute bottom-[4px] inset-x-[20px] flex justify-between text-[10px] text-newTableText opacity-60 pointer-events-none">
+            <span>{first}</span>
+            <span>{last}</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -160,23 +220,26 @@ const MiniCard: FC<{ item: AnalyticsDataItem }> = ({ item }) => {
   const trend = seriesTrend(item);
   const value = rawTotal(item);
   return (
-    <div className="flex flex-col gap-[6px] bg-newTableHeader border border-newTableBorder rounded-[12px] px-[16px] py-[14px]">
+    <div className="flex flex-col gap-[8px] bg-newTableHeader border border-newTableBorder rounded-[14px] px-[18px] py-[16px] transition-colors hover:border-[#612bd3]/40">
       <div className="flex items-center justify-between">
-        <div className="text-[12px] font-medium text-newTableText">
-          {item.label}
+        <div className="flex items-center gap-[8px]">
+          <div className="w-[6px] h-[6px] rounded-full bg-[#612bd3] opacity-50" />
+          <span className="text-[13px] font-medium text-newTableText">
+            {item.label}
+          </span>
         </div>
         {trend !== null && <TrendIndicator value={trend} />}
       </div>
       <div
-        className={`text-[24px] leading-[28px] font-semibold tracking-tight tabular-nums ${
+        className={`text-[28px] leading-[32px] font-semibold tracking-tight tabular-nums ${
           value < 0 ? 'text-[#f97066]' : ''
         }`}
       >
         {formatTotal(item)}
       </div>
       {hasSeries(item) && (
-        <div className="text-newTableText">
-          <Sparkline data={item.data} height={28} />
+        <div className="text-newTableText -mx-[6px]">
+          <Sparkline data={item.data} height={32} />
         </div>
       )}
     </div>
