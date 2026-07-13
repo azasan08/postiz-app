@@ -1,5 +1,6 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class NotificationsRepository {
@@ -7,6 +8,18 @@ export class NotificationsRepository {
     private _notifications: PrismaRepository<'notifications'>,
     private _user: PrismaRepository<'user'>
   ) {}
+
+  private recipientFilterForUser(
+    userId: string
+  ): Prisma.NotificationsWhereInput {
+    return {
+      OR: [{ recipientId: null }, { recipientId: userId }],
+    };
+  }
+
+  private orgWideOnlyFilter(): Prisma.NotificationsWhereInput {
+    return { recipientId: null };
+  }
 
   getLastReadNotification(userId: string) {
     return this._user.model.user.findFirst({
@@ -31,16 +44,22 @@ export class NotificationsRepository {
           createdAt: {
             gt: lastReadNotifications!,
           },
+          ...this.recipientFilterForUser(userId),
         },
       }),
     };
   }
 
-  async createNotification(organizationId: string, content: string) {
+  async createNotification(
+    organizationId: string,
+    content: string,
+    recipientId?: string | null
+  ) {
     await this._notifications.model.notifications.create({
       data: {
         organizationId,
         content,
+        recipientId: recipientId ?? null,
       },
     });
   }
@@ -52,17 +71,25 @@ export class NotificationsRepository {
         createdAt: {
           gte: new Date(since),
         },
+        ...this.orgWideOnlyFilter(),
       },
     });
   }
 
-  async getNotificationsPaginated(organizationId: string, page: number) {
+  async getNotificationsPaginated(
+    organizationId: string,
+    page: number,
+    userId?: string
+  ) {
     const limit = 100;
     const skip = page * limit;
 
     const where = {
       organizationId,
       deletedAt: null as Date | null,
+      ...(userId
+        ? this.recipientFilterForUser(userId)
+        : this.orgWideOnlyFilter()),
     };
 
     const [notifications, total] = await Promise.all([
@@ -115,6 +142,7 @@ export class NotificationsRepository {
         take: 10,
         where: {
           organizationId,
+          ...this.recipientFilterForUser(userId),
         },
         select: {
           createdAt: true,

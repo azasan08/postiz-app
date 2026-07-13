@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   ValidationPipe,
 } from '@nestjs/common';
@@ -17,7 +18,7 @@ import {
 } from '@prisma/client';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
 import { GetPostsListDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.list.dto';
-import { shuffle } from 'lodash';
+import { shuffle, capitalize } from 'lodash';
 import { CreateGeneratedPostsDto } from '@gitroom/nestjs-libraries/dtos/generator/create.generated.posts.dto';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
@@ -53,6 +54,10 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { weightedLength } from '@gitroom/helpers/utils/count.length';
+import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
+import { buildReviewRequestMessages } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification-message.utils';
+import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
+import { UsersRepository } from '@gitroom/nestjs-libraries/database/prisma/users/users.repository';
 
 type PostWithConditionals = Post & {
   integration?: Integration;
@@ -70,7 +75,10 @@ export class PostsService {
     private _shortLinkService: ShortLinkService,
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _notificationService: NotificationService,
+    private _organizationRepository: OrganizationRepository,
+    private _usersRepository: UsersRepository
   ) {}
 
   searchForMissingThreeHoursPosts() {
@@ -1170,5 +1178,126 @@ export class PostsService {
     comment: string
   ) {
     return this._postRepository.createComment(orgId, userId, postId, comment);
+  }
+
+  async requestReview(orgId: string, userId: string, postId: string) {
+    const post = await this._postRepository.getDraftPostForReview(
+      postId,
+      orgId
+    );
+    if (!post) {
+      throw new BadRequestException('Post not found');
+    }
+
+    if (post.state !== State.DRAFT) {
+      throw new BadRequestException('Post must be a draft to request review');
+    }
+
+    const reviewRequestKey = `postiz:review-request:${orgId}:${postId}`;
+    const acquired = await ioRedis.set(
+      reviewRequestKey,
+      userId,
+      'EX',
+      300,
+      'NX'
+    );
+    if (acquired !== 'OK') {
+      throw new ConflictException(
+        'A review was already requested for this draft in the last 5 minutes'
+      );
+    }
+
+    try {
+      const recipients =
+        await this._organizationRepository.getEnabledOrgMembers(orgId, userId);
+
+      if (!recipients.length) {
+        throw new BadRequestException(
+          'No team members available to review this draft'
+        );
+      }
+
+      const requester = await this._usersRepository.getUserById(userId);
+      const requesterName = requester?.name || requester?.email || 'A teammate';
+      const organizationName = post.organization?.name || 'your organization';
+      const channelName = post.integration?.name || 'Unknown channel';
+      const providerName = capitalize(
+        post.integration?.providerIdentifier?.split('-')[0] || 'channel'
+      );
+      const preview = this.buildPostContentPreview(post.content);
+      const calendarLink = this.buildDraftReviewCalendarLink(post.publishDate);
+
+      const { subject, inAppContent, emailHtml } = buildReviewRequestMessages({
+        requesterName,
+        organizationName,
+        channelName,
+        providerName,
+        preview,
+        calendarLink,
+      });
+
+      const notificationResult =
+        await this._notificationService.notifyRecipientMembers(
+          orgId,
+          subject,
+          inAppContent,
+          emailHtml,
+          recipients.map((recipient) => ({
+            id: recipient.user.id,
+            email: recipient.user.email,
+            sendSuccessEmails: recipient.user.sendSuccessEmails,
+            sendFailureEmails: recipient.user.sendFailureEmails,
+          })),
+          'info'
+        );
+
+      return {
+        success: true,
+        notified: notificationResult.inAppNotified,
+        emailsEnqueued: notificationResult.emailsEnqueued,
+        emailsFailed: notificationResult.emailsFailed,
+      };
+    } catch (error) {
+      await ioRedis.del(reviewRequestKey);
+      throw error;
+    }
+  }
+
+  private buildPostContentPreview(content: string) {
+    try {
+      const parsed = JSON.parse(content);
+      if (!Array.isArray(parsed)) {
+        return this.truncatePreview(
+          stripHtmlValidation('normal', content || '', true)
+        );
+      }
+
+      const combined = parsed
+        .map((block) =>
+          stripHtmlValidation('normal', block?.content || '', true)
+        )
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+
+      return this.truncatePreview(combined);
+    } catch {
+      return this.truncatePreview(
+        stripHtmlValidation('normal', content || '', true)
+      );
+    }
+  }
+
+  private truncatePreview(value: string) {
+    if (!value) {
+      return '';
+    }
+
+    return value.length > 120 ? `${value.slice(0, 117)}...` : value;
+  }
+
+  private buildDraftReviewCalendarLink(publishDate: Date) {
+    const date = dayjs.utc(publishDate).format('YYYY-MM-DD');
+    return `${process.env.FRONTEND_URL}/launches?startDate=${date}&endDate=${date}&display=day`;
   }
 }

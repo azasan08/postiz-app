@@ -8,6 +8,13 @@ import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.sear
 
 export type NotificationType = 'success' | 'fail' | 'info';
 
+export type NotificationRecipient = {
+  id: string;
+  email: string;
+  sendSuccessEmails: boolean;
+  sendFailureEmails: boolean;
+};
+
 @Injectable()
 export class NotificationService {
   constructor(
@@ -24,10 +31,15 @@ export class NotificationService {
     );
   }
 
-  getNotificationsPaginated(organizationId: string, page: number) {
+  getNotificationsPaginated(
+    organizationId: string,
+    page: number,
+    userId?: string
+  ) {
     return this._notificationRepository.getNotificationsPaginated(
       organizationId,
-      page
+      page,
+      userId
     );
   }
 
@@ -105,6 +117,77 @@ export class NotificationService {
       }
       await this.sendEmail(user.user.email, subject, message);
     }
+  }
+
+  async notifyRecipientMembers(
+    orgId: string,
+    subject: string,
+    inAppContent: string,
+    emailHtml: string,
+    recipients: NotificationRecipient[],
+    type: NotificationType = 'info'
+  ) {
+    let emailsEnqueued = 0;
+    let emailsFailed = 0;
+
+    for (const recipient of recipients) {
+      await this._notificationRepository.createNotification(
+        orgId,
+        inAppContent,
+        recipient.id
+      );
+
+      try {
+        if (
+          await this.sendEmailToRecipient(recipient, subject, emailHtml, type)
+        ) {
+          emailsEnqueued++;
+        }
+      } catch (err) {
+        emailsFailed++;
+        console.error(
+          `Failed to enqueue notification email to ${recipient.email}:`,
+          err
+        );
+      }
+    }
+
+    return {
+      inAppNotified: recipients.length,
+      emailsEnqueued,
+      emailsFailed,
+    };
+  }
+
+  private async sendEmailToRecipient(
+    recipient: {
+      email: string;
+      sendSuccessEmails?: boolean;
+      sendFailureEmails?: boolean;
+    },
+    subject: string,
+    message: string,
+    type?: NotificationType
+  ): Promise<boolean> {
+    if (
+      type === 'info' &&
+      !recipient.sendSuccessEmails &&
+      !recipient.sendFailureEmails
+    ) {
+      return false;
+    }
+
+    if (type !== 'info') {
+      if (type === 'success' && !recipient.sendSuccessEmails) {
+        return false;
+      }
+      if (type === 'fail' && !recipient.sendFailureEmails) {
+        return false;
+      }
+    }
+
+    await this.sendEmail(recipient.email, subject, message);
+    return true;
   }
 
   async sendEmail(to: string, subject: string, html: string, replyTo?: string) {

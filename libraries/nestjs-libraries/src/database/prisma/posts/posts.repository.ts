@@ -866,6 +866,35 @@ export class PostsRepository {
     });
   }
 
+  getDraftPostForReview(postId: string, orgId: string) {
+    return this._post.model.post.findFirst({
+      where: {
+        id: postId,
+        organizationId: orgId,
+        deletedAt: null,
+        parentPostId: null,
+      },
+      select: {
+        id: true,
+        state: true,
+        content: true,
+        group: true,
+        publishDate: true,
+        integration: {
+          select: {
+            name: true,
+            providerIdentifier: true,
+          },
+        },
+        organization: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+  }
+
   async getPostByForWebhookId(postId: string) {
     return this._post.model.post.findMany({
       where: {

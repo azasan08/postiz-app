@@ -113,6 +113,7 @@ model User {
   sendFailureEmails     Boolean              @default(true)
   sendStreakEmails      Boolean              @default(true)
   oauthAuthorizations   OAuthAuthorization[]
+  targetedNotifications Notifications[]      @relation("NotificationRecipient")
 
   @@unique([email, providerName])
   @@index([lastReadNotifications])
@@ -448,16 +449,20 @@ model Post {
 model Notifications {
   id             String       @id @default(uuid())
   organizationId String
+  recipientId    String?
   content        String
   link           String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
+  recipient      User?        @relation("NotificationRecipient", fields: [recipientId], references: [id])
 
   @@index([createdAt])
   @@index([organizationId])
   @@index([deletedAt])
+  @@index([recipientId])
+  @@index([organizationId, recipientId])
 }
 
 model MessagesGroup {

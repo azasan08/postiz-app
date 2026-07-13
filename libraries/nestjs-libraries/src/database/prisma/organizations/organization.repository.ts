@@ -373,6 +373,29 @@ export class OrganizationRepository {
     });
   }
 
+  getEnabledOrgMembers(orgId: string, excludeUserId: string) {
+    return this._userOrg.model.userOrganization.findMany({
+      where: {
+        organizationId: orgId,
+        disabled: false,
+        userId: {
+          not: excludeUserId,
+        },
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            sendSuccessEmails: true,
+            sendFailureEmails: true,
+          },
+        },
+      },
+    });
+  }
+
   async deleteTeamMember(orgId: string, userId: string) {
     return this._userOrg.model.userOrganization.delete({
       where: {

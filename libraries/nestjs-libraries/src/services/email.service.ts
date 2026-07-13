@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { escapeHtml } from '@gitroom/helpers/utils/escape.html';
 import { EmailInterface } from '@gitroom/nestjs-libraries/emails/email.interface';
 import { ResendProvider } from '@gitroom/nestjs-libraries/emails/resend.provider';
 import { EmptyProvider } from '@gitroom/nestjs-libraries/emails/empty.provider';
@@ -93,7 +94,7 @@ export class EmailService {
                 margin-bottom: 1.5rem;
                 text-align: left;
                 color: #1f2937;
-            ">${subject}</h1>
+            ">${escapeHtml(subject)}</h1>
             
             <div style="
                 margin-bottom: 2rem;
@@ -116,7 +117,9 @@ export class EmailService {
                         margin: 0;
                     ">${process.env.EMAIL_FROM_NAME}</h2>
                     <div style="font-size: 12px">
-                      You can change your notification preferences in your <a href="${process.env.FRONTEND_URL}/settings">account settings.</a>
+                      You can change your notification preferences in your <a href="${
+                        process.env.FRONTEND_URL
+                      }/settings">account settings.</a>
                      </div>
                 </div>
             </div>

@@ -79,6 +79,16 @@ export class PostsController {
     return this._postsService.createComment(org.id, user.id, id, body.comment);
   }
 
+  @Post('/:id/request-review')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  async requestReview(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('id') id: string
+  ) {
+    return this._postsService.requestReview(org.id, user.id, id);
+  }
+
   @Get('/tags')
   async getTags(@GetOrgFromRequest() org: Organization) {
     return { tags: await this._postsService.getTags(org.id) };
@@ -159,7 +169,10 @@ export class PostsController {
   }
 
   @Get('/group/:group')
-  getPostsByGroup(@GetOrgFromRequest() org: Organization, @Param('group') group: string) {
+  getPostsByGroup(
+    @GetOrgFromRequest() org: Organization,
+    @Param('group') group: string
+  ) {
     return this._postsService.getPostsByGroup(org.id, group);
   }
 

@@ -44,12 +44,23 @@ import { useShortlinkPreference } from '@gitroom/frontend/components/settings/sh
 import dayjs from 'dayjs';
 import { Button } from '@gitroom/react/form/button';
 
+type SavePostResponseItem = {
+  postId: string;
+  integration: string;
+};
+
+type SavePostResult = {
+  postId?: string;
+  saved?: SavePostResponseItem[];
+} | null;
+
 export const ManageModal: FC<AddEditModalProps> = (props) => {
   const t = useT();
   const fetch = useFetch();
   const ref = useRef(null);
   const existingData = useExistingData();
   const [loading, setLoading] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const toaster = useToaster();
   const modal = useModals();
   const [showSettings, setShowSettings] = useState(false);
@@ -190,8 +201,21 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     return;
   }, [existingData, mutate, modal]);
 
-  const schedule = useCallback(
-    (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
+  const savePost = useCallback(
+    async (
+      type: 'draft' | 'now' | 'schedule' | 'update',
+      options?: {
+        closeModal?: boolean;
+        showToast?: boolean;
+        skipShortlinkPrompt?: boolean;
+      }
+    ): Promise<SavePostResult> => {
+      const {
+        closeModal = true,
+        showToast = true,
+        skipShortlinkPrompt = false,
+      } = options ?? {};
+
       if (
         (type === 'now' || type === 'schedule') &&
         (existingData?.posts?.[0]?.state === 'PUBLISHED' ||
@@ -236,11 +260,6 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
         }
       }
 
-      setLoading(true);
-
-      // Pull the local values to build the payload, but rely on the server
-      // (`/posts/valid`) for the actual validation — checkValidity now lives
-      // server-side so it can't be bypassed.
       const allValues = await ref.current.getAllValues();
 
       const integrationById = (id: string) =>
@@ -295,9 +314,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               ),
             'warning'
           );
-          setLoading(false);
           focus(item.id, 'preview');
-          return;
+          return null;
         }
 
         if (type !== 'draft') {
@@ -311,9 +329,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 'warning'
               );
               focus(item.id, 'fix');
-              setLoading(false);
               setShowSettings(true);
-              return;
+              return null;
             }
 
             if (item.errors !== true) {
@@ -324,9 +341,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 'warning'
               );
               focus(item.id, 'preview');
-              setLoading(false);
               setShowSettings(false);
-              return;
+              return null;
             }
 
             if (item.tooLong) {
@@ -338,8 +354,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 'warning'
               );
               focus(item.id, 'preview');
-              setLoading(false);
-              return;
+              return null;
             }
           }
         }
@@ -355,7 +370,6 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             method: 'POST',
             body: JSON.stringify({
               messages: allValues
-                // platforms that remove links won't keep shortlinks either
                 .filter(
                   (p: any) => !integrationById(p.id)?.integration?.stripLinks
                 )
@@ -366,10 +380,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
         if (shortLinkUrl.ask) {
           if (shortlinkPreference === 'YES') {
-            // Automatically shortlink without asking
             shortLink = true;
-          } else {
-            // ASK: Show the dialog
+          } else if (!skipShortlinkPrompt) {
             shortLink = await deleteDialog(
               t(
                 'shortlink_urls_question',
@@ -403,38 +415,131 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           closeOnClickOutside: true,
         });
 
+        return null;
+      }
+
+      if (addEditSets) {
+        addEditSets(data);
+        return null;
+      }
+
+      const response = await fetch('/posts', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        toaster.show(
+          body?.message || t('failed_to_save_post', 'Failed to save post'),
+          'warning'
+        );
+        return null;
+      }
+
+      const saved = (await response.json()) as SavePostResponseItem[];
+      mutate();
+
+      if (showToast) {
+        toaster.show(
+          !existingData.integration
+            ? t('added_successfully', 'Added successfully')
+            : t('updated_successfully', 'Updated successfully')
+        );
+      }
+
+      if (customClose) {
+        setTimeout(() => {
+          customClose();
+        }, 2000);
+      }
+
+      if (closeModal) {
+        modal.closeAll();
+      }
+
+      const integrationId = existingData?.integration;
+      const postId =
+        saved?.find((item) => item.integration === integrationId)?.postId ??
+        saved?.[0]?.postId;
+
+      return { postId, saved };
+    },
+    [
+      ref,
+      repeater,
+      tags,
+      date,
+      addEditSets,
+      dummy,
+      shortlinkPreferenceData,
+      existingData,
+      selectedIntegrations,
+      fetch,
+      modal,
+      mutate,
+      customClose,
+      toaster,
+      t,
+    ]
+  );
+
+  const schedule = useCallback(
+    (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
+      setLoading(true);
+      try {
+        await savePost(type);
+      } finally {
         setLoading(false);
       }
-
-      if (!dummy) {
-        addEditSets
-          ? addEditSets(data)
-          : await fetch('/posts', {
-              method: 'POST',
-              body: JSON.stringify(data),
-            });
-
-        if (!addEditSets) {
-          mutate();
-          toaster.show(
-            !existingData.integration
-              ? t('added_successfully', 'Added successfully')
-              : t('updated_successfully', 'Updated successfully')
-          );
-        }
-        if (customClose) {
-          setTimeout(() => {
-            customClose();
-          }, 2000);
-        }
-
-        if (!addEditSets) {
-          modal.closeAll();
-        }
-      }
     },
-    [ref, repeater, tags, date, addEditSets, dummy, shortlinkPreferenceData]
+    [savePost]
   );
+
+  const requestReview = useCallback(async () => {
+    setReviewLoading(true);
+    let draftSaved = false;
+    try {
+      const saved = await savePost('draft', {
+        closeModal: false,
+        showToast: false,
+        skipShortlinkPrompt: true,
+      });
+
+      if (!saved?.postId) {
+        return;
+      }
+
+      draftSaved = true;
+
+      const response = await fetch(`/posts/${saved.postId}/request-review`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message || 'Failed to send review request');
+      }
+
+      toaster.show(
+        t('review_request_sent', 'Review request sent to your team')
+      );
+    } catch (error: any) {
+      toaster.show(
+        error?.message ||
+          t('review_request_failed', 'Failed to send review request'),
+        'warning'
+      );
+    } finally {
+      setReviewLoading(false);
+      if (draftSaved) {
+        modal.closeAll();
+      }
+    }
+  }, [fetch, savePost, t, toaster, modal]);
+
+  const isExistingDraft =
+    !!existingData?.integration && existingData?.posts?.[0]?.state === 'DRAFT';
 
   return (
     <div className="w-full h-full flex-1 p-[40px] flex relative">
@@ -577,10 +682,34 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               </button>
             )}
             <DatePicker onChange={setDate} date={date} />
+            {!addEditSets && isExistingDraft && (
+              <button
+                disabled={
+                  selectedIntegrations.length === 0 ||
+                  loading ||
+                  reviewLoading ||
+                  locked
+                }
+                onClick={requestReview}
+                className="relative cursor-pointer disabled:cursor-not-allowed px-[20px] h-[44px] bg-btnSimple justify-center items-center flex rounded-[8px] text-[15px] font-[600]"
+              >
+                {reviewLoading && (
+                  <div className="absolute left-[50%] top-[50%] -translate-y-[50%] -translate-x-[50%]">
+                    <div className="animate-spin h-[20px] w-[20px] border-4 border-textColor border-t-transparent rounded-full" />
+                  </div>
+                )}
+                <div className={clsx(reviewLoading && 'invisible')}>
+                  {t('request_review', 'レビュー依頼')}
+                </div>
+              </button>
+            )}
             {!addEditSets && (
               <button
                 disabled={
-                  selectedIntegrations.length === 0 || loading || locked
+                  selectedIntegrations.length === 0 ||
+                  loading ||
+                  reviewLoading ||
+                  locked
                 }
                 onClick={schedule('draft')}
                 className="relative cursor-pointer disabled:cursor-not-allowed px-[20px] h-[44px] bg-btnSimple justify-center items-center flex rounded-[8px] text-[15px] font-[600]"
@@ -599,7 +728,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <button
                 className="text-white text-[15px] font-[600] min-w-[180px] btnSub disabled:cursor-not-allowed disabled:opacity-80 outline-none gap-[8px] flex justify-center items-center h-[44px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px]"
                 disabled={
-                  selectedIntegrations.length === 0 || loading || locked
+                  selectedIntegrations.length === 0 ||
+                  loading ||
+                  reviewLoading ||
+                  locked
                 }
                 onClick={schedule('draft')}
               >
@@ -610,7 +742,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <div className="group cursor-pointer relative">
                 <button
                   disabled={
-                    selectedIntegrations.length === 0 || loading || locked
+                    selectedIntegrations.length === 0 ||
+                    loading ||
+                    reviewLoading ||
+                    locked
                   }
                   onClick={schedule('schedule')}
                   className="text-white relative min-w-[180px] btnSub disabled:cursor-not-allowed disabled:opacity-80 outline-none gap-[8px] flex justify-center items-center h-[44px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px]"
@@ -647,7 +782,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   <button
                     onClick={schedule('now')}
                     disabled={
-                      selectedIntegrations.length === 0 || loading || locked
+                      selectedIntegrations.length === 0 ||
+                      loading ||
+                      reviewLoading ||
+                      locked
                     }
                     className="rounded-[8px] z-[300] disabled:cursor-not-allowed disabled:opacity-80 hidden group-hover:flex absolute bottom-[100%] -left-[12px] p-[12px] w-[206px] bg-newBgColorInner"
                   >
