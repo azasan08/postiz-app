@@ -13,6 +13,7 @@ export const InstagramPreview: FC<{
   const { value: topValue, integration } = useIntegration();
   const current = useLaunchStore((state) => state.current);
   const mediaDir = useMediaDirectory();
+  const accountName = integration?.display || integration?.name;
 
   const renderContent = topValue.map((p) => {
     const newContent = stripHtmlValidation(
@@ -33,7 +34,7 @@ export const InstagramPreview: FC<{
     );
 
     const finalValue =
-      `<strong class="text-[15px] font-[600]">${integration?.name} </strong>` +
+      `<strong class="text-[15px] font-[600]">${accountName} </strong>` +
       newContent
         .slice(start, end)
         .replace(/\[\[\[([.\s\S]*?)]]]/, (match, match1) => {
@@ -58,7 +59,7 @@ export const InstagramPreview: FC<{
           />
         </div>
         <div className="flex flex-col leading-[18px]">
-          <div className="text-[15px] font-[600]">{integration?.name}</div>
+          <div className="text-[15px] font-[600]">{accountName}</div>
         </div>
       </div>
       {!!renderContent?.[0]?.images?.length ? (
