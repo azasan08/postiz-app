@@ -259,7 +259,6 @@ export const ContinueIntegration: FC<{
       'linkedin-page': 'LinkedIn',
       youtube: 'YouTube',
       gmb: 'Google Business',
-      tumblr: 'Tumblr',
     };
     return names[provider] || provider;
   }, [provider]);

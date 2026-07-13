@@ -1,6 +1,7 @@
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { Injectable } from '@nestjs/common';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
+import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
@@ -13,7 +14,8 @@ import { AutopostService } from '@gitroom/nestjs-libraries/database/prisma/autop
 export class OrganizationService {
   constructor(
     private _organizationRepository: OrganizationRepository,
-    private _notificationsService: NotificationService
+    private _notificationsService: NotificationService,
+    private _emailService: EmailService
   ) {}
   async createOrgAndUser(
     body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
@@ -83,11 +85,28 @@ export class OrganizationService {
     const url =
       process.env.FRONTEND_URL +
       `/?org=${AuthService.signJWT({ ...body, orgId, timeLimit, id })}`;
+    const organization = await this._organizationRepository.getOrgById(orgId);
+    const organizationName = organization?.name || 'your organization';
+    const safeOrganizationName = organizationName
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
     if (body.sendEmail) {
-      await this._notificationsService.sendEmail(
+      await this._emailService.sendEmailSync(
         body.email,
-        'You have been invited to join an organization',
-        `You have been invited to join an organization. Click <a href="${url}">here</a> to join.<br />The link will expire in 2 days.`
+        `You are invited to join ${organizationName} on Postiz`,
+        `
+          <p>You have been invited to join <strong>${safeOrganizationName}</strong> on Postiz.</p>
+          <p>
+            <a href="${url}" style="display:inline-block;padding:10px 16px;border-radius:6px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600;">
+              Accept invitation
+            </a>
+          </p>
+          <p>If the button does not work, use this link: <a href="${url}">${url}</a></p>
+          <p>This invitation link expires in 2 days.</p>
+        `
       );
     }
     return { url };

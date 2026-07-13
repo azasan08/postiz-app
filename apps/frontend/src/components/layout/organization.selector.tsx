@@ -49,11 +49,11 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
             <div className="bg-btnPrimary !flex !relative max-w-[500px] mx-auto py-[12px] px-[12px]">Select Organization</div>
           )}
           {!asOpenSelect && (
-            <div className="flex items-center">
+            <div className="flex items-center gap-[8px] rounded-[6px] border border-tableBorder bg-newBgColor px-[10px] py-[6px] text-newTextColor">
               <svg
                 className={user?.tier.current === 'FREE' ? 'animate-bounce drop-shadow-glow': ''}
-                width="24"
-                height="24"
+                width="18"
+                height="18"
                 viewBox="0 0 26 26"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -63,17 +63,28 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
                   fill="currentColor"
                 />
               </svg>
+              <span className="max-w-[160px] truncate text-[13px] font-[600]">
+                {current?.name || 'Organization'}
+              </span>
+              <span className="text-[10px] text-textItemBlur">v</span>
             </div>
           )}
           {data?.length > 1 && (
             <div
               className={clsx(
-                'hidden py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col',
+                'z-[50] hidden min-w-[180px] py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col shadow-lg',
                 asOpenSelect ? '!flex !relative max-w-[500px] mx-auto mb-[10px]' : '',
               )}
             >
               {data?.map((org: { name: string; id: string }) => (
-                <div key={org.id} onClick={changeOrg(org)}>
+                <div
+                  key={org.id}
+                  onClick={changeOrg(org)}
+                  className={clsx(
+                    'rounded-[4px] px-[8px] py-[6px] hover:bg-newBgColor',
+                    org.id === user?.orgId && 'bg-newBgColor text-newTextColor font-[700]'
+                  )}
+                >
                   {org.name}
                 </div>
               ))}
