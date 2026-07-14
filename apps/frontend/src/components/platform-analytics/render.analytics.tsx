@@ -1,4 +1,11 @@
-import { FC, useCallback, useMemo, useState, useId } from 'react';
+import {
+  FC,
+  ReactElement,
+  useCallback,
+  useMemo,
+  useState,
+  useId,
+} from 'react';
 import { Integration } from '@prisma/client';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -13,6 +20,114 @@ interface AnalyticsDataItem {
 }
 
 const ACCENT = '#612bd3';
+
+// Per-metric identity: color + icon, matched on the (english) label the
+// backends emit. Fallback is the brand accent with a generic chart icon.
+interface MetricStyle {
+  color: string;
+  icon: ReactElement;
+}
+
+const icon = (paths: ReactElement) => (
+  <svg
+    width="17"
+    height="17"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {paths}
+  </svg>
+);
+
+const METRIC_STYLES: Array<{ match: RegExp } & MetricStyle> = [
+  {
+    match: /reach|impression/i,
+    color: '#612bd3',
+    icon: icon(
+      <>
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+        <circle cx="12" cy="12" r="3" />
+      </>
+    ),
+  },
+  {
+    match: /follower|subscriber|member|fans?/i,
+    color: '#2563eb',
+    icon: icon(
+      <>
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </>
+    ),
+  },
+  {
+    match: /like|favorite|reaction/i,
+    color: '#e5484d',
+    icon: icon(
+      <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
+    ),
+  },
+  {
+    match: /view|watch/i,
+    color: '#0d9488',
+    icon: icon(
+      <>
+        <polygon points="10 8 16 12 10 16 10 8" />
+        <circle cx="12" cy="12" r="10" />
+      </>
+    ),
+  },
+  {
+    match: /comment|repl/i,
+    color: '#d97706',
+    icon: icon(
+      <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 21l1.9-5a8.4 8.4 0 0 1-.9-4 8.4 8.4 0 0 1 8.4-8.4A8.4 8.4 0 0 1 21 11.5z" />
+    ),
+  },
+  {
+    match: /share|repost|retweet/i,
+    color: '#7c3aed',
+    icon: icon(
+      <>
+        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+        <path d="M16 6l-4-4-4 4M12 2v13" />
+      </>
+    ),
+  },
+  {
+    match: /save|bookmark/i,
+    color: '#db2777',
+    icon: icon(
+      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    ),
+  },
+  {
+    match: /click|engagement/i,
+    color: '#0284c7',
+    icon: icon(
+      <>
+        <path d="M9 9l5 12 1.8-5.2L21 14z" />
+        <path d="M7.2 2.2L8 5.1M5.1 8l-2.9-.8M14 4.1L12 6M6 12l-1.9 2" />
+      </>
+    ),
+  },
+];
+
+const metricStyle = (label: string): MetricStyle => {
+  const found = METRIC_STYLES.find((m) => m.match.test(label));
+  if (found) {
+    return { color: found.color, icon: found.icon };
+  }
+  return {
+    color: ACCENT,
+    icon: icon(<path d="M3 3v18h18M7 15l4-4 3 3 5-6" />),
+  };
+};
 
 // A metric only has a drawable history when the provider returns real daily
 // values. Single total_value points (Instagram engagement metrics) and the
@@ -57,6 +172,20 @@ const formatTotal = (item: AnalyticsDataItem) => {
   return new Intl.NumberFormat().format(Math.round(value));
 };
 
+const Chip: FC<{ style: MetricStyle; size: 'lg' | 'sm' }> = ({
+  style,
+  size,
+}) => (
+  <span
+    className={`grid place-items-center rounded-[10px] flex-none ${
+      size === 'lg' ? 'w-[34px] h-[34px]' : 'w-[28px] h-[28px] scale-90'
+    }`}
+    style={{ backgroundColor: style.color + '1f', color: style.color }}
+  >
+    {style.icon}
+  </span>
+);
+
 const TrendIndicator: FC<{ value: number }> = ({ value }) => {
   if (Math.abs(value) < 0.05) {
     return null;
@@ -64,22 +193,29 @@ const TrendIndicator: FC<{ value: number }> = ({ value }) => {
   const isPositive = value > 0;
   return (
     <div
-      className={`flex items-center gap-[4px] text-[12px] font-semibold rounded-[6px] px-[8px] py-[3px] ${
+      className={`flex items-center gap-[3px] text-[12px] font-semibold rounded-full px-[9px] py-[4px] ${
         isPositive
           ? 'text-[#1fa971] bg-[#32d583]/10'
           : 'text-[#e5544d] bg-[#f97066]/10'
       }`}
     >
       <svg
-        width="10"
-        height="10"
-        viewBox="0 0 12 12"
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
         fill="none"
-        className={isPositive ? '' : 'rotate-180'}
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       >
-        <path d="M6 2.5L10 7.5H2L6 2.5Z" fill="currentColor" />
+        {isPositive ? (
+          <path d="M7 17L17 7M17 7H9M17 7v8" />
+        ) : (
+          <path d="M7 7l10 10M17 17H9M17 17V9" />
+        )}
       </svg>
-      <span>{Math.abs(value).toFixed(0)}%</span>
+      <span className="tabular-nums">{Math.abs(value).toFixed(0)}%</span>
     </div>
   );
 };
@@ -109,11 +245,12 @@ const smoothPath = (points: Array<{ x: number; y: number }>) => {
 const Sparkline: FC<{
   data: Array<{ total: number }>;
   height: number;
+  color: string;
   area?: boolean;
-}> = ({ data, height, area }) => {
+}> = ({ data, height, color, area }) => {
   const gradientId = useId();
   const width = 400;
-  const padY = 8;
+  const padY = area ? 10 : 5;
   const values = data.map((d) => d.total);
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -138,8 +275,8 @@ const Sparkline: FC<{
         <>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={ACCENT} stopOpacity="0.25" />
-              <stop offset="1" stopColor={ACCENT} stopOpacity="0.02" />
+              <stop offset="0" stopColor={color} stopOpacity="0.28" />
+              <stop offset="1" stopColor={color} stopOpacity="0.01" />
             </linearGradient>
           </defs>
           <path
@@ -151,23 +288,17 @@ const Sparkline: FC<{
       <path
         d={path}
         fill="none"
-        stroke={area ? ACCENT : 'currentColor'}
-        strokeOpacity={area ? 1 : 0.4}
-        strokeWidth={area ? 2.5 : 1.5}
+        stroke={color}
+        strokeOpacity={area ? 1 : 0.9}
+        strokeWidth={area ? 2.5 : 1.6}
         strokeLinejoin="round"
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
       {area && (
         <>
-          <circle
-            cx={last.x}
-            cy={last.y}
-            r="8"
-            fill={ACCENT}
-            fillOpacity="0.15"
-          />
-          <circle cx={last.x} cy={last.y} r="3.5" fill={ACCENT} />
+          <circle cx={last.x} cy={last.y} r="7" fill={color} fillOpacity="0.14" />
+          <circle cx={last.x} cy={last.y} r="3.5" fill={color} />
         </>
       )}
     </svg>
@@ -177,41 +308,36 @@ const Sparkline: FC<{
 const HeroCard: FC<{ item: AnalyticsDataItem }> = ({ item }) => {
   const trend = seriesTrend(item);
   const value = rawTotal(item);
+  const style = metricStyle(item.label);
   const first = item.data[0]?.date;
   const last = item.data[item.data.length - 1]?.date;
   return (
-    <div className="flex flex-col bg-newTableHeader border border-newTableBorder rounded-[14px] overflow-hidden transition-colors hover:border-[#612bd3]/40">
-      <div className="flex items-start justify-between px-[20px] pt-[18px]">
-        <div>
-          <div className="flex items-center gap-[8px]">
-            <div className="w-[8px] h-[8px] rounded-full bg-[#612bd3]" />
-            <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-newTableText">
-              {item.label}
-            </span>
-          </div>
-          <div
-            className={`mt-[6px] text-[42px] leading-[46px] font-semibold tracking-tight tabular-nums ${
-              value < 0 ? 'text-[#f97066]' : ''
-            }`}
-          >
-            {formatTotal(item)}
-          </div>
+    <div className="flex flex-col bg-newTableHeader border border-newTableBorder rounded-[16px] overflow-hidden transition-all hover:border-newTableBorder hover:shadow-[0_10px_30px_rgba(97,43,211,0.10)]">
+      <div className="flex items-start justify-between px-[22px] pt-[20px]">
+        <div className="flex items-center gap-[9px]">
+          <Chip style={style} size="lg" />
+          <span className="text-[12px] font-semibold tracking-[0.06em] uppercase text-newTableText">
+            {item.label}
+          </span>
         </div>
-        {trend !== null && (
-          <div className="pt-[4px]">
-            <TrendIndicator value={trend} />
-          </div>
-        )}
+        {trend !== null && <TrendIndicator value={trend} />}
       </div>
-      <div className="mt-[14px] relative">
-        <Sparkline data={item.data} height={96} area={true} />
-        {first && last && (
-          <div className="absolute bottom-[4px] inset-x-[20px] flex justify-between text-[10px] text-newTableText opacity-60 pointer-events-none">
-            <span>{first}</span>
-            <span>{last}</span>
-          </div>
-        )}
+      <div
+        className={`mt-[12px] px-[22px] text-[40px] leading-[42px] font-semibold tracking-tight tabular-nums ${
+          value < 0 ? 'text-[#f97066]' : ''
+        }`}
+      >
+        {formatTotal(item)}
       </div>
+      <div className="mt-[14px]">
+        <Sparkline data={item.data} height={88} color={style.color} area={true} />
+      </div>
+      {first && last && (
+        <div className="flex justify-between px-[22px] pt-[6px] pb-[16px] text-[11px] text-newTableText opacity-70 tabular-nums">
+          <span>{first}</span>
+          <span>{last}</span>
+        </div>
+      )}
     </div>
   );
 };
@@ -219,27 +345,28 @@ const HeroCard: FC<{ item: AnalyticsDataItem }> = ({ item }) => {
 const MiniCard: FC<{ item: AnalyticsDataItem }> = ({ item }) => {
   const trend = seriesTrend(item);
   const value = rawTotal(item);
+  const style = metricStyle(item.label);
   return (
-    <div className="flex flex-col gap-[8px] bg-newTableHeader border border-newTableBorder rounded-[14px] px-[18px] py-[16px] transition-colors hover:border-[#612bd3]/40">
+    <div className="flex flex-col gap-[10px] bg-newTableHeader border border-newTableBorder rounded-[16px] px-[16px] pt-[16px] pb-[12px] transition-all hover:shadow-[0_10px_30px_rgba(97,43,211,0.10)]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-[8px]">
-          <div className="w-[6px] h-[6px] rounded-full bg-[#612bd3] opacity-50" />
-          <span className="text-[13px] font-medium text-newTableText">
+          <Chip style={style} size="sm" />
+          <span className="text-[12px] font-semibold tracking-[0.04em] uppercase text-newTableText">
             {item.label}
           </span>
         </div>
         {trend !== null && <TrendIndicator value={trend} />}
       </div>
       <div
-        className={`text-[28px] leading-[32px] font-semibold tracking-tight tabular-nums ${
+        className={`text-[26px] leading-[28px] font-semibold tracking-tight tabular-nums ${
           value < 0 ? 'text-[#f97066]' : ''
         }`}
       >
         {formatTotal(item)}
       </div>
       {hasSeries(item) && (
-        <div className="text-newTableText -mx-[6px]">
-          <Sparkline data={item.data} height={32} />
+        <div className="-mx-[4px] -mb-[2px]">
+          <Sparkline data={item.data} height={30} color={style.color} />
         </div>
       )}
     </div>
@@ -383,7 +510,7 @@ export const RenderAnalytics: FC<{
         </div>
       )}
       {!!groups.zeros.length && (
-        <div className="flex flex-wrap items-center gap-x-[24px] gap-y-[8px] border-t border-newTableBorder pt-[14px] text-[13px]">
+        <div className="flex flex-wrap items-center gap-x-[20px] gap-y-[8px] border border-dashed border-newTableBorder rounded-[12px] px-[16px] py-[12px] text-[13px]">
           <span className="text-newTableText">
             {t('no_activity_this_period', 'No activity this period:')}
           </span>
