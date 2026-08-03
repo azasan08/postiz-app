@@ -77,7 +77,7 @@ export const AnalyticsTopPosts: FC<{
                 <div className="flex items-center gap-[8px]">
                   <ImageWithFallback
                     fallbackSrc={`/icons/platforms/${post.provider}.png`}
-                    src={post.picture || ''}
+                    src={post.picture || `/icons/platforms/${post.provider}.png`}
                     alt={post.channelName}
                     width={18}
                     height={18}

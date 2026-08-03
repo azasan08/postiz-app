@@ -78,7 +78,7 @@ export const AnalyticsPerformanceTable: FC<{
                   <div className="flex items-center gap-[8px]">
                     <ImageWithFallback
                       fallbackSrc={`/icons/platforms/${row.provider}.png`}
-                      src={row.picture || ''}
+                      src={row.picture || `/icons/platforms/${row.provider}.png`}
                       alt={row.channelName}
                       width={22}
                       height={22}
