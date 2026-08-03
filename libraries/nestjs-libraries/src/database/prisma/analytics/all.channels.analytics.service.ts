@@ -562,17 +562,26 @@ export class AllChannelsAnalyticsService {
         [integration.id]
       );
 
-      const [postMetrics, followers] = await Promise.all([
-        this.loadPostMetrics(org.id, posts, provider, limit),
-        limit(provider, () =>
-          this._integrationService.checkFollowers(
-            org,
-            integration.id,
-            previousFrom,
-            to
-          )
-        ),
-      ]);
+      // Sequential on purpose: checkFollowers refreshes an expired token and
+      // persists it before post analytics run, so the same integration never
+      // refreshes twice concurrently within one request.
+      // ponytail: cross-request refresh races and per-request p-limit (no
+      // distributed semaphore) are accepted at current scale (1 replica,
+      // 4 channels); add a Redis single-flight lock if replicas/channels grow.
+      const followers = await limit(provider, () =>
+        this._integrationService.checkFollowers(
+          org,
+          integration.id,
+          previousFrom,
+          to
+        )
+      );
+      const postMetrics = await this.loadPostMetrics(
+        org.id,
+        posts,
+        provider,
+        limit
+      );
 
       const reactions = this.sumMetric(postMetrics.map((p) => p.reactions));
       const comments =

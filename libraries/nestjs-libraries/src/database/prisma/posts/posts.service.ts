@@ -199,7 +199,7 @@ export class PostsService {
       }
     }
 
-    const cacheKey = `analytics:v2:post:${orgId}:${post.id}`;
+    const cacheKey = `analytics:v2:post:${orgId}:${post.id}:${date}`;
     const getIntegrationData = await ioRedis.get(cacheKey);
     if (getIntegrationData) {
       return JSON.parse(getIntegrationData);
