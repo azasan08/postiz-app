@@ -15,6 +15,16 @@ export const getTemporalModule = (
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // Allowlist: queues this worker server SHOULD run, comma-separated
+  // (e.g. ONLY_QUEUE="facebook,instagram,x"). Empty = run all queues.
+  // "main" is always kept. Saves RAM by not booting workers for providers
+  // that have no connected integration. A queue disabled by mistake is
+  // recoverable: Temporal keeps its tasks queued until a worker returns.
+  const onlyQueues = (process.env.ONLY_QUEUE || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // How many worker servers share each (non-excluded) queue. Per-server
   // concurrency is divided by this so the GLOBAL concurrency stays correct.
   // 1 server => 1 (full), 2 servers => 2 (half each), 3 servers => 3, etc.
@@ -47,6 +57,12 @@ export const getTemporalModule = (
               taskQueue: integration.identifier.split('-')[0],
             }))
             .filter(({ taskQueue }) => !excludeQueues.includes(taskQueue))
+            .filter(
+              ({ taskQueue }) =>
+                onlyQueues.length === 0 ||
+                taskQueue === 'main' ||
+                onlyQueues.includes(taskQueue)
+            )
             .map(({ integration, taskQueue }) => {
               // Split the per-provider cap across the servers sharing this
               // queue. Floor (never below 1) so the global total never exceeds
