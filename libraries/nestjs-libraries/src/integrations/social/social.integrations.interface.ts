@@ -1,10 +1,24 @@
 import { Integration } from '@prisma/client';
+import { FollowersAnalyticsResult } from '@gitroom/helpers/interfaces/all.channels.analytics';
 
 export interface ClientInformation {
   client_id: string;
   client_secret: string;
   instanceUrl: string;
 }
+
+export interface AnalyticsRangeOptions {
+  from?: string;
+  to?: string;
+  type?: string;
+}
+
+export interface FollowersRangeOptions {
+  from: string;
+  to: string;
+  type?: string;
+}
+
 export interface IAuthenticator {
   authenticate(
     params: {
@@ -26,7 +40,8 @@ export interface IAuthenticator {
   analytics?(
     id: string,
     accessToken: string,
-    date: number
+    date: number,
+    options?: AnalyticsRangeOptions | string
   ): Promise<AnalyticsData[]>;
   postAnalytics?(
     integrationId: string,
@@ -34,6 +49,11 @@ export interface IAuthenticator {
     postId: string,
     fromDate: number,
   ): Promise<AnalyticsData[]>;
+  followers?(
+    id: string,
+    accessToken: string,
+    options: FollowersRangeOptions
+  ): Promise<FollowersAnalyticsResult>;
   changeNickname?(
     id: string,
     accessToken: string,

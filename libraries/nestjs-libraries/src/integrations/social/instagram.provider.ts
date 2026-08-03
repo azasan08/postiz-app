@@ -8,10 +8,13 @@ import {
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import {
   SocialAbstract,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+
+dayjs.extend(utc);
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
@@ -921,19 +924,30 @@ export class InstagramProvider
     id: string,
     token: string,
     date: number,
-    type = 'graph.facebook.com'
+    typeOrOptions:
+      | string
+      | { from?: string; to?: string; type?: string } = 'graph.facebook.com'
   ): Promise<AnalyticsData[]> {
-    const [accessToken, userToken] = token.split('___');
-    const until = dayjs().startOf('day').unix();
-    const since = dayjs().subtract(date, 'day').unix();
+    const options =
+      typeof typeOrOptions === 'string'
+        ? { type: typeOrOptions }
+        : typeOrOptions || {};
+    const type = options.type || 'graph.facebook.com';
+    const [accessToken] = token.split('___');
+    const until = options.to
+      ? dayjs.utc(options.to).endOf('day').unix()
+      : dayjs().startOf('day').unix();
+    const since = options.from
+      ? dayjs.utc(options.from).startOf('day').unix()
+      : dayjs().subtract(date, 'day').unix();
 
-    const { data, ...all } = await (
+    const { data } = await (
       await fetch(
         `https://${type}/v21.0/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`
       )
     ).json();
 
-    const { data: data2, ...all2 } = await (
+    const { data: data2 } = await (
       await fetch(
         `https://${type}/v21.0/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`
       )
@@ -952,7 +966,7 @@ export class InstagramProvider
     );
 
     analytics.push(
-      ...data2.map((d: any) => ({
+      ...(data2?.map((d: any) => ({
         label: this.setTitle(d.name),
         percentageChange: 5,
         data: [
@@ -961,10 +975,68 @@ export class InstagramProvider
             date: dayjs().format('YYYY-MM-DD'),
           },
         ],
-      }))
+      })) || [])
     );
 
     return analytics;
+  }
+
+  async followers(
+    id: string,
+    token: string,
+    options: { from: string; to: string; type?: string }
+  ) {
+    const type = options.type || 'graph.facebook.com';
+    const [accessToken] = token.split('___');
+    const since = dayjs.utc(options.from).startOf('day').unix();
+    const until = dayjs.utc(options.to).endOf('day').unix();
+
+    const profile = await (
+      await fetch(
+        `https://${type}/v21.0/${id}?fields=followers_count&access_token=${accessToken}`
+      )
+    ).json();
+
+    const current =
+      typeof profile?.followers_count === 'number'
+        ? profile.followers_count
+        : null;
+
+    const { data } = await (
+      await fetch(
+        `https://${type}/v21.0/${id}/insights?metric=follower_count&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+
+    const growthValues =
+      data?.find((d: any) => d.name === 'follower_count')?.values || [];
+    const growth = growthValues.map((v: any) => ({
+      date: dayjs(v.end_time).format('YYYY-MM-DD'),
+      value: Number(v.value) || 0,
+    }));
+
+    if (current === null || !growth.length) {
+      return {
+        current,
+        series: null,
+        growth: growth.length ? growth : null,
+        previous: null,
+      };
+    }
+
+    const series: Array<{ date: string; value: number }> = [];
+    let cursor = current;
+    for (let i = growth.length - 1; i >= 0; i--) {
+      series.unshift({ date: growth[i].date, value: cursor });
+      cursor = cursor - growth[i].value;
+    }
+
+    return {
+      current,
+      series,
+      growth,
+      previous: series.length ? series[0].value - (growth[0]?.value || 0) : null,
+    };
   }
 
   music(accessToken: string, data: { q: string }) {

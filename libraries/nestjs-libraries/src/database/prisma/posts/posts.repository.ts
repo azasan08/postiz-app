@@ -920,4 +920,53 @@ export class PostsRepository {
       },
     });
   }
+
+  getPublishedPostsForAnalytics(
+    orgId: string,
+    from: string,
+    to: string,
+    integrationIds?: string[]
+  ) {
+    return this._post.model.post.findMany({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        parentPostId: null,
+        state: State.PUBLISHED,
+        releaseId: {
+          not: null,
+        },
+        publishDate: {
+          gte: dayjs.utc(from).startOf('day').toDate(),
+          lte: dayjs.utc(to).endOf('day').toDate(),
+        },
+        ...(integrationIds?.length
+          ? {
+              integrationId: {
+                in: integrationIds,
+              },
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        content: true,
+        image: true,
+        publishDate: true,
+        releaseURL: true,
+        releaseId: true,
+        integration: {
+          select: {
+            id: true,
+            name: true,
+            providerIdentifier: true,
+            picture: true,
+          },
+        },
+      },
+      orderBy: {
+        publishDate: 'desc',
+      },
+    });
+  }
 }

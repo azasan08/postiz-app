@@ -8,6 +8,7 @@ import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { RenderAnalytics } from '@gitroom/frontend/components/platform-analytics/render.analytics';
+import { AllChannelsAnalytics } from '@gitroom/frontend/components/platform-analytics/all-channels/all.channels.analytics';
 import { Select } from '@gitroom/react/form/select';
 import { Button } from '@gitroom/react/form/button';
 import { useRouter } from 'next/navigation';
@@ -29,13 +30,16 @@ const allowedIntegrations = [
   'threads',
   'x',
 ];
+
+type Selection = 'all' | number;
+
 export const PlatformAnalytics = () => {
   const fetch = useFetch();
   const t = useT();
   const router = useRouter();
   const { disableXAnalytics } = useVariables();
 
-  const [current, setCurrent] = useState(0);
+  const [current, setCurrent] = useState<Selection>('all');
   const [key, setKey] = useState(7);
   const [refresh, setRefresh] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
@@ -68,6 +72,9 @@ export const PlatformAnalytics = () => {
     );
   }, [data]);
   const currentIntegration = useMemo(() => {
+    if (current === 'all') {
+      return null;
+    }
     return sortedIntegrations[current];
   }, [current, sortedIntegrations]);
   const options = useMemo(() => {
@@ -204,6 +211,25 @@ export const PlatformAnalytics = () => {
               </svg>
             </div>
           </div>
+          <div
+            onClick={() => setCurrent('all')}
+            className={clsx(
+              'flex gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-e-[8px] cursor-pointer',
+              current !== 'all' && 'opacity-20 hover:opacity-100'
+            )}
+          >
+            <div className="relative rounded-full flex justify-center items-center gap-[6px]">
+              <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
+                <SVGLine />
+              </div>
+              <div className="w-[36px] h-[36px] rounded-[8px] bg-btnPrimary text-white grid place-items-center text-[11px] font-[700]">
+                ALL
+              </div>
+            </div>
+            <div className="flex-1 whitespace-nowrap text-ellipsis overflow-hidden group-[.sidebar]:hidden">
+              All Channels
+            </div>
+          </div>
           {sortedIntegrations.map((integration, index) => (
             <div
               key={integration.id}
@@ -223,7 +249,7 @@ export const PlatformAnalytics = () => {
               }}
               className={clsx(
                 'flex gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-e-[8px]',
-                currentIntegration.id !== integration.id &&
+                currentIntegration?.id !== integration.id &&
                   'opacity-20 hover:opacity-100 cursor-pointer'
               )}
             >
@@ -273,29 +299,36 @@ export const PlatformAnalytics = () => {
         </div>
       </div>
       <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
-        {!!options.length && (
-          <div className="flex-1 flex flex-col gap-[14px]">
-            <div className="max-w-[200px]">
-              <Select
-                label=""
-                name="date"
-                disableForm={true}
-                hideErrors={true}
-                onChange={(e) => setKey(+e.target.value)}
-              >
-                {options.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.value}
-                  </option>
-                ))}
-              </Select>
+        {current === 'all' ? (
+          <AllChannelsAnalytics />
+        ) : (
+          !!options.length && (
+            <div className="flex-1 flex flex-col gap-[14px]">
+              <div className="max-w-[200px]">
+                <Select
+                  label=""
+                  name="date"
+                  disableForm={true}
+                  hideErrors={true}
+                  onChange={(e) => setKey(+e.target.value)}
+                >
+                  {options.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.value}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex-1">
+                {!!keys && !!currentIntegration && !refresh && (
+                  <RenderAnalytics
+                    integration={currentIntegration}
+                    date={keys}
+                  />
+                )}
+              </div>
             </div>
-            <div className="flex-1">
-              {!!keys && !!currentIntegration && !refresh && (
-                <RenderAnalytics integration={currentIntegration} date={keys} />
-              )}
-            </div>
-          </div>
+          )
         )}
       </div>
     </>

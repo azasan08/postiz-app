@@ -7,10 +7,13 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import {
   SocialAbstract,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+
+dayjs.extend(utc);
 import {
   FacebookDto,
   FACEBOOK_PRESET_MAX_CHARS,
@@ -756,10 +759,15 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   async analytics(
     id: string,
     accessToken: string,
-    date: number
+    date: number,
+    options?: { from?: string; to?: string }
   ): Promise<AnalyticsData[]> {
-    const until = dayjs().endOf('day').unix();
-    const since = dayjs().subtract(date, 'day').unix();
+    const until = options?.to
+      ? dayjs.utc(options.to).endOf('day').unix()
+      : dayjs().endOf('day').unix();
+    const since = options?.from
+      ? dayjs.utc(options.from).startOf('day').unix()
+      : dayjs().subtract(date, 'day').unix();
 
     // Reach/impression metrics (page_impressions_unique, page_posts_impressions_unique,
     // page_video_views) were deprecated by Meta on 2026-06-15 and now return an
@@ -802,6 +810,65 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         })),
       })) || []
     );
+  }
+
+  async followers(
+    id: string,
+    accessToken: string,
+    options: { from: string; to: string }
+  ) {
+    const since = dayjs.utc(options.from).startOf('day').unix();
+    const until = dayjs.utc(options.to).endOf('day').unix();
+
+    const pageRes = await (
+      await fetch(
+        `https://graph.facebook.com/v23.0/${id}?fields=followers_count,fan_count&access_token=${accessToken}`
+      )
+    ).json();
+
+    const current =
+      typeof pageRes?.followers_count === 'number'
+        ? pageRes.followers_count
+        : typeof pageRes?.fan_count === 'number'
+        ? pageRes.fan_count
+        : null;
+
+    const { data } = await (
+      await fetch(
+        `https://graph.facebook.com/v23.0/${id}/insights?metric=page_daily_follows&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+
+    const growthValues =
+      data?.find((d: any) => d.name === 'page_daily_follows')?.values || [];
+    const growth = growthValues.map((v: any) => ({
+      date: dayjs(v.end_time).format('YYYY-MM-DD'),
+      value: Number(v.value) || 0,
+    }));
+
+    if (current === null || !growth.length) {
+      return {
+        current,
+        series: null,
+        growth: growth.length ? growth : null,
+        previous: null,
+      };
+    }
+
+    // Reconstruct end-of-day totals by walking growth backwards from current.
+    const series: Array<{ date: string; value: number }> = [];
+    let cursor = current;
+    for (let i = growth.length - 1; i >= 0; i--) {
+      series.unshift({ date: growth[i].date, value: cursor });
+      cursor = cursor - growth[i].value;
+    }
+
+    return {
+      current,
+      series,
+      growth,
+      previous: series.length ? series[0].value - (growth[0]?.value || 0) : null,
+    };
   }
 
   async postAnalytics(

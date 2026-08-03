@@ -199,12 +199,11 @@ export class PostsService {
       }
     }
 
-    // const getIntegrationData = await ioRedis.get(
-    //   `integration:${orgId}:${post.id}:${date}`
-    // );
-    // if (getIntegrationData) {
-    //   return JSON.parse(getIntegrationData);
-    // }
+    const cacheKey = `analytics:v2:post:${orgId}:${post.id}`;
+    const getIntegrationData = await ioRedis.get(cacheKey);
+    if (getIntegrationData) {
+      return JSON.parse(getIntegrationData);
+    }
 
     try {
       const loadAnalytics = await integrationProvider.postAnalytics(
@@ -214,7 +213,7 @@ export class PostsService {
         date
       );
       await ioRedis.set(
-        `integration:${orgId}:${post.id}:${date}`,
+        cacheKey,
         JSON.stringify(loadAnalytics),
         'EX',
         !process.env.NODE_ENV || process.env.NODE_ENV === 'development'
@@ -230,6 +229,20 @@ export class PostsService {
     }
 
     return [];
+  }
+
+  getPublishedPostsForAnalytics(
+    orgId: string,
+    from: string,
+    to: string,
+    integrationIds?: string[]
+  ) {
+    return this._postRepository.getPublishedPostsForAnalytics(
+      orgId,
+      from,
+      to,
+      integrationIds
+    );
   }
 
   async getStatistics(orgId: string, id: string) {

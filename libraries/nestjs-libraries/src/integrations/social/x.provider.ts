@@ -16,7 +16,10 @@ import { Integration } from '@prisma/client';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import { uniqBy } from 'lodash';
+
+dayjs.extend(utc);
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { stripLinks as removeLinks } from '@gitroom/helpers/utils/strip.links';
 import { XDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/x.dto';
@@ -641,14 +644,21 @@ export class XProvider extends SocialAbstract implements SocialProvider {
   async analytics(
     id: string,
     accessToken: string,
-    date: number
+    date: number,
+    options?: { from?: string; to?: string }
   ): Promise<AnalyticsData[]> {
     if (process.env.DISABLE_X_ANALYTICS) {
       return [];
     }
 
-    const until = dayjs().endOf('day');
-    const since = dayjs().subtract(date > 100 ? 100 : date, 'day');
+    // Legacy path caps at 100 days. New from/to callers are rejected by DTO
+    // instead of silently truncating here.
+    const until = options?.to
+      ? dayjs.utc(options.to).endOf('day')
+      : dayjs().endOf('day');
+    const since = options?.from
+      ? dayjs.utc(options.from).startOf('day')
+      : dayjs().subtract(date > 100 ? 100 : date, 'day');
 
     const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
     const client = new TwitterApi({
@@ -726,6 +736,55 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       console.log(err);
     }
     return [];
+  }
+
+  async followers(
+    id: string,
+    accessToken: string,
+    _options: { from: string; to: string }
+  ) {
+    if (process.env.DISABLE_X_ANALYTICS) {
+      return {
+        current: null,
+        series: null,
+        growth: null,
+        previous: null,
+      };
+    }
+
+    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
+    const client = new TwitterApi({
+      appKey: process.env.X_API_KEY!,
+      appSecret: process.env.X_API_SECRET!,
+      accessToken: accessTokenSplit,
+      accessSecret: accessSecretSplit,
+    });
+
+    try {
+      const user = await client.v2.user(id, {
+        'user.fields': ['public_metrics'],
+      });
+      const current =
+        typeof user?.data?.public_metrics?.followers_count === 'number'
+          ? user.data.public_metrics.followers_count
+          : null;
+
+      // X does not expose historical follower series for this integration.
+      return {
+        current,
+        series: null,
+        growth: null,
+        previous: null,
+      };
+    } catch (err) {
+      console.log(err);
+      return {
+        current: null,
+        series: null,
+        growth: null,
+        previous: null,
+      };
+    }
   }
 
   async postAnalytics(

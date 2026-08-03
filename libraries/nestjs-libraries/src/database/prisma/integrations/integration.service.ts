@@ -11,6 +11,7 @@ import {
   AnalyticsData,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { FollowersAnalyticsResult } from '@gitroom/helpers/interfaces/all.channels.analytics';
 import { Integration, Organization } from '@prisma/client';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import dayjs from 'dayjs';
@@ -402,6 +403,166 @@ export class IntegrationService {
     }
 
     return [];
+  }
+
+  private redisTtl() {
+    return !process.env.NODE_ENV || process.env.NODE_ENV === 'development'
+      ? 1
+      : 3600;
+  }
+
+  private async refreshIntegrationToken(
+    org: Organization,
+    getIntegration: Integration,
+    forceRefresh = false
+  ) {
+    const integrationProvider = this._integrationManager.getSocialIntegration(
+      getIntegration.providerIdentifier
+    );
+
+    if (
+      dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) ||
+      forceRefresh
+    ) {
+      const data = await this._refreshIntegrationService.refresh(
+        getIntegration
+      );
+      if (!data) {
+        return null;
+      }
+
+      const { accessToken } = data;
+
+      if (accessToken) {
+        getIntegration.token = accessToken;
+
+        if (integrationProvider.refreshWait) {
+          await timer(10000);
+        }
+      } else {
+        await this.disconnectChannel(org.id, getIntegration);
+        return null;
+      }
+    }
+
+    return integrationProvider;
+  }
+
+  async checkAnalyticsRange(
+    org: Organization,
+    integration: string,
+    from: string,
+    to: string,
+    forceRefresh = false
+  ): Promise<AnalyticsData[]> {
+    const getIntegration = await this.getIntegrationById(org.id, integration);
+
+    if (!getIntegration) {
+      throw new Error('Invalid integration');
+    }
+
+    if (getIntegration.type !== 'social') {
+      return [];
+    }
+
+    const integrationProvider = await this.refreshIntegrationToken(
+      org,
+      getIntegration,
+      forceRefresh
+    );
+    if (!integrationProvider) {
+      return [];
+    }
+
+    const cacheKey = `analytics:v2:range:${org.id}:${integration}:${from}:${to}`;
+    const cached = await ioRedis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    const inclusiveDays =
+      dayjs.utc(to).startOf('day').diff(dayjs.utc(from).startOf('day'), 'day') +
+      1;
+
+    if (integrationProvider.analytics) {
+      try {
+        const loadAnalytics = await integrationProvider.analytics(
+          getIntegration.internalId,
+          getIntegration.token,
+          inclusiveDays,
+          { from, to }
+        );
+        await ioRedis.set(
+          cacheKey,
+          JSON.stringify(loadAnalytics),
+          'EX',
+          this.redisTtl()
+        );
+        return loadAnalytics;
+      } catch (e) {
+        if (e instanceof RefreshToken) {
+          return this.checkAnalyticsRange(org, integration, from, to, true);
+        }
+        throw e;
+      }
+    }
+
+    return [];
+  }
+
+  async checkFollowers(
+    org: Organization,
+    integration: string,
+    from: string,
+    to: string,
+    forceRefresh = false
+  ): Promise<FollowersAnalyticsResult> {
+    const empty: FollowersAnalyticsResult = {
+      current: null,
+      series: null,
+      growth: null,
+      previous: null,
+    };
+
+    const getIntegration = await this.getIntegrationById(org.id, integration);
+    if (!getIntegration || getIntegration.type !== 'social') {
+      return empty;
+    }
+
+    const integrationProvider = await this.refreshIntegrationToken(
+      org,
+      getIntegration,
+      forceRefresh
+    );
+    if (!integrationProvider?.followers) {
+      return empty;
+    }
+
+    const cacheKey = `analytics:v2:followers:${org.id}:${integration}:${from}:${to}`;
+    const cached = await ioRedis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    try {
+      const result = await integrationProvider.followers(
+        getIntegration.internalId,
+        getIntegration.token,
+        { from, to }
+      );
+      await ioRedis.set(
+        cacheKey,
+        JSON.stringify(result),
+        'EX',
+        this.redisTtl()
+      );
+      return result;
+    } catch (e) {
+      if (e instanceof RefreshToken) {
+        return this.checkFollowers(org, integration, from, to, true);
+      }
+      throw e;
+    }
   }
 
   customers(orgId: string) {

@@ -210,13 +210,16 @@ export class InstagramStandaloneProvider
     );
   }
 
-  async analytics(id: string, accessToken: string, date: number) {
-    return instagramProvider.analytics(
-      id,
-      accessToken,
-      date,
-      'graph.instagram.com'
-    );
+  async analytics(
+    id: string,
+    accessToken: string,
+    date: number,
+    options?: { from?: string; to?: string }
+  ) {
+    return instagramProvider.analytics(id, accessToken, date, {
+      ...(options || {}),
+      type: 'graph.instagram.com',
+    });
   }
 
   async postAnalytics(
@@ -232,5 +235,16 @@ export class InstagramStandaloneProvider
       date,
       'graph.instagram.com'
     );
+  }
+
+  async followers(
+    id: string,
+    accessToken: string,
+    options: { from: string; to: string }
+  ) {
+    return instagramProvider.followers(id, accessToken, {
+      ...options,
+      type: 'graph.instagram.com',
+    });
   }
 }
