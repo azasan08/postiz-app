@@ -26,4 +26,5 @@ COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 RUN pnpm install --frozen-lockfile
 RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build
 
-CMD ["sh", "-c", "nginx && pnpm run pm2"]
+# Run the pm2-run chain directly: `pnpm run pm2` -> `pnpm run pm2-run` left two resident pnpm wrappers (~128MB) blocked on `pm2 logs`.
+CMD ["sh", "-c", "nginx && (pm2 delete all || true) && pnpm run prisma-db-push && pnpm --filter ./apps/backend run pm2 && sleep 10 && pnpm run --filter ./apps/orchestrator --filter ./apps/frontend --parallel pm2 && exec pm2 logs"]
